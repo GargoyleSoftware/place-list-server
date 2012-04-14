@@ -2,44 +2,36 @@ package main
 
 import (
 	"code.google.com/p/go.net/websocket"
-	"fmt"
-	"io"
-	"math/rand"
+	"log"
+    "fmt"
 	"net/http"
-	"time"
+    "regexp"
 )
 
+var trackPattern = regexp.MustCompile("spotify:track:.*")
+
+type SocketCmd struct {
+	Cmd    string      `json:"cmd"`
+	Params interface{} `json:"params"`
+}
+
+func (s *SocketCmd) String() string {
+    return fmt.Sprintf("[cmd: %s, params: %v]", s.Cmd, s.Params)
+}
+
+type AddTrackParams struct {
+	Trackname string `json:"trackname"`
+}
+
+func SocketHandler(sock *websocket.Conn) {
+	var cmd SocketCmd
+	for {
+        websocket.JSON.Receive(sock, &cmd)
+        log.Println(cmd)
+	}
+}
+
 func main() {
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, `<html>
-<head>
-<script src="http://code.jquery.com/jquery-1.7.2.min.js"></script>
-<script>
-$(document).ready(function() {
-    var conn = new WebSocket("ws://localhost:8080/socket");
-    conn.onclose = function(event) {
-        console.log({"close": event});
-    };
-    conn.onmessage = function(event) {
-        $("#poop").append(event.data);
-    };
-});
-</script>
-</head>
-<body>
-<p>this too shall pass</p>
-<ul id="poop"></ul>
-</body>
-</html>`)
-	})
-
-	http.Handle("/socket", websocket.Handler(func(sock *websocket.Conn) {
-		for {
-			io.WriteString(sock, fmt.Sprintf("<li>%d</li>", rand.Int63n(1e9)))
-			time.Sleep(time.Duration(5e6))
-		}
-	}))
-
+	http.Handle("/socket", websocket.Handler(SocketHandler))
 	http.ListenAndServe(":8080", nil)
 }
