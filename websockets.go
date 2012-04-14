@@ -5,10 +5,7 @@ import (
 	"log"
     "fmt"
 	"net/http"
-    "regexp"
 )
-
-var trackPattern = regexp.MustCompile("spotify:track:.*")
 
 type SocketCmd struct {
 	Cmd    string      `json:"cmd"`
@@ -28,6 +25,7 @@ func SocketHandler(sock *websocket.Conn) {
 	for {
         websocket.JSON.Receive(sock, &cmd)
         log.Println(cmd)
+        websocket.JSON.Send(sock, cmd)
 	}
 }
 
