@@ -2,7 +2,7 @@ package main
 
 import (
 	"code.google.com/p/go.net/websocket"
-	"fmt"
+	// "fmt"
 	"io"
 	"launchpad.net/mgo"
 	"launchpad.net/mgo/bson"
@@ -37,15 +37,13 @@ type Event struct {
 	Id       string              `json:"event_id" bson:"event_id"`
 	UserId   string              `json:"user_id" bson:"user_id"`
 	Upcoming map[string][]string `json:"upcoming" bson:"upcoming,omitempty"`
+	Playing  map[string][]string `json:"playing" bson:"playing,omitempty"`
 	History  []*PastTrack        `json:"history" bson:"history,omitempty"`
 }
 
 type Track struct {
 	Votes int
 	Id    string
-}
-
-type StartTrackParams struct {
 }
 
 type UpcomingTrack struct {
@@ -70,19 +68,24 @@ type AddTrackParams struct {
 	UserId  string `json:"user_id"`
 }
 
+type StartTrackParams AddTrackParams
+
 type SetAuthParams struct {
 	UserId string `json:"user_id"`
 }
 
+/*
 func (s *SocketCmd) String() string {
 	return fmt.Sprintf("[cmd: %s, params: %v]", s.Cmd, s.Params)
 }
+*/
 
 type ConnectionManager struct {
 	Connected      []*websocket.Conn
 	ConnectionLock *sync.Mutex
 	CreateEvent    chan *CreateEventParams
 	Upvotes        chan *UpvoteParams
+	StartTrack     chan *StartTrackParams
 	AddTrack       chan *AddTrackParams
 	SetAuth        chan *SetAuthParams
 	Login          chan *websocket.Conn
@@ -96,6 +99,7 @@ func NewConnectionManager() *ConnectionManager {
 		CreateEvent:    make(chan *CreateEventParams),
 		Upvotes:        make(chan *UpvoteParams),
 		AddTrack:       make(chan *AddTrackParams),
+		StartTrack:     make(chan *StartTrackParams),
 		SetAuth:        make(chan *SetAuthParams),
 		Login:          make(chan *websocket.Conn),
 		Logout:         make(chan *websocket.Conn),
@@ -105,6 +109,7 @@ func NewConnectionManager() *ConnectionManager {
 	go m.listenForLogins()
 	go m.listenForLogouts()
 	go m.listenForAdds()
+	go m.listenForTrackStarts()
 	return m
 }
 
@@ -116,6 +121,16 @@ func (m *ConnectionManager) listenForNewEvents() {
 			continue
 		}
 		websocket.JSON.Send(eventInfo.UserConn, &OutgoingCmd{Cmd: "event_info", Params: event})
+	}
+}
+
+func (m *ConnectionManager) listenForTrackStarts() {
+	for trackStart := range m.StartTrack {
+		_, err := GetEvent(trackStart.EventId, trackStart.UserId)
+		if err != nil {
+			log.Println("Unable to retrieve event when starting track play: ", err.Error())
+			continue
+		}
 	}
 }
 
@@ -151,13 +166,30 @@ func (m *ConnectionManager) listenForAdds() {
 	c := db.C("events")
 	for add := range m.AddTrack {
 		selector := bson.M{"event_id": add.EventId}
-		err := c.Update(selector, bson.M{"$push": bson.M{"upcoming." + add.TrackId: add.UserId}})
+
+		var event Event
+		err := c.Find(selector).One(&event)
+		if err != nil {
+			log.Println("ERROR querying for track: ", err.Error())
+			continue
+		}
+		if _, ok := event.Upcoming[add.TrackId]; ok {
+			continue
+		}
+
+		err = c.Update(selector, bson.M{"$addToSet": bson.M{"upcoming." + add.TrackId: add.UserId}})
 		if err != nil {
 			log.Println("ERROR adding track: ", err.Error())
 			log.Println(selector)
 			continue
 		}
-		m.Broadcast(&OutgoingCmd{Cmd: "add_track", Params: *add})
+
+		err = c.Find(selector).One(&event)
+		if err != nil {
+			log.Println("ERROR querying for track: ", err.Error())
+			continue
+		}
+		m.Broadcast(&OutgoingCmd{Cmd: "add_track", Params: bson.M{"track_id": add.TrackId, "upvoters": event.Upcoming[add.TrackId]}})
 	}
 }
 
@@ -165,24 +197,24 @@ func (m *ConnectionManager) listenForUpvotes() {
 	c := db.C("events")
 	for like := range m.Upvotes {
 		selector := bson.M{"event_id": like.EventId}
-        var action string
-        if like.Remove {
-            action = "$pull"
-        } else {
-            action = "$addToSet"
-        }
+		var action string
+		if like.Remove {
+			action = "$pull"
+		} else {
+			action = "$addToSet"
+		}
 		err := c.Update(selector, bson.M{action: bson.M{"upcoming." + like.TrackId: like.UserId}})
 		if err != nil {
 			log.Println("ERROR adding upvote: ", err.Error())
 			log.Println(selector)
 		}
-        var event Event
-        err = c.Find(selector).One(&event)
-        if err != nil {
-            log.Println("ERROR getting event info: ", err.Error())
-            continue
-        }
-        m.Broadcast(&OutgoingCmd{Cmd: "upvote", Params: bson.M{"track_id": like.TrackId, "upvoters": event.Upcoming[like.TrackId]}})
+		var event Event
+		err = c.Find(selector).One(&event)
+		if err != nil {
+			log.Println("ERROR getting event info: ", err.Error())
+			continue
+		}
+		m.Broadcast(&OutgoingCmd{Cmd: "upvote", Params: bson.M{"track_id": like.TrackId, "upvoters": event.Upcoming[like.TrackId]}})
 	}
 }
 
@@ -234,6 +266,13 @@ func SocketHandler(sock *websocket.Conn) {
 				EventId: cmd.Params["event_id"].(string),
 				TrackId: cmd.Params["track_id"].(string),
 				Remove:  cmd.Params["remove"].(bool),
+			}
+		case "start_track":
+            log.Println(cmd.Params)
+			manager.StartTrack <- &StartTrackParams{
+				TrackId: cmd.Params["track_id"].(string),
+				UserId:  cmd.Params["user_id"].(string),
+				EventId: cmd.Params["event_id"].(string),
 			}
 		case "login":
 			manager.CreateEvent <- &CreateEventParams{
