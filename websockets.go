@@ -61,6 +61,7 @@ type UpvoteParams struct {
 	UserId  string
 	EventId string
 	TrackId string
+	Remove  bool
 }
 
 type AddTrackParams struct {
@@ -114,7 +115,7 @@ func (m *ConnectionManager) listenForNewEvents() {
 			log.Println("FUCK BALLS")
 			continue
 		}
-        websocket.JSON.Send(eventInfo.UserConn, &OutgoingCmd{Cmd: "event_info", Params: event})
+		websocket.JSON.Send(eventInfo.UserConn, &OutgoingCmd{Cmd: "event_info", Params: event})
 	}
 }
 
@@ -164,12 +165,24 @@ func (m *ConnectionManager) listenForUpvotes() {
 	c := db.C("events")
 	for like := range m.Upvotes {
 		selector := bson.M{"event_id": like.EventId}
-		err := c.Update(selector, bson.M{"$addToSet": bson.M{"upcoming." + like.TrackId: like.UserId}})
+        var action string
+        if like.Remove {
+            action = "$pull"
+        } else {
+            action = "$addToSet"
+        }
+		err := c.Update(selector, bson.M{action: bson.M{"upcoming." + like.TrackId: like.UserId}})
 		if err != nil {
 			log.Println("ERROR adding upvote: ", err.Error())
 			log.Println(selector)
 		}
-		m.Broadcast(&OutgoingCmd{Cmd: "upvote", Params: *like})
+        var event Event
+        err = c.Find(selector).One(&event)
+        if err != nil {
+            log.Println("ERROR getting event info: ", err.Error())
+            continue
+        }
+        m.Broadcast(&OutgoingCmd{Cmd: "upvote", Params: bson.M{"track_id": like.TrackId, "upvoters": event.Upcoming[like.TrackId]}})
 	}
 }
 
@@ -220,6 +233,7 @@ func SocketHandler(sock *websocket.Conn) {
 				UserId:  cmd.Params["user_id"].(string),
 				EventId: cmd.Params["event_id"].(string),
 				TrackId: cmd.Params["track_id"].(string),
+				Remove:  cmd.Params["remove"].(bool),
 			}
 		case "login":
 			manager.CreateEvent <- &CreateEventParams{
