@@ -37,7 +37,7 @@ type Event struct {
 	Id       string              `json:"event_id" bson:"event_id"`
 	UserId   string              `json:"user_id" bson:"user_id"`
 	Upcoming map[string][]string `json:"upcoming" bson:"upcoming,omitempty"`
-	Playing  map[string][]string `json:"playing" bson:"playing,omitempty"`
+	Playing  string              `json:"playing" bson:"playing,omitempty"`
 	History  []*PastTrack        `json:"history" bson:"history,omitempty"`
 }
 
@@ -125,12 +125,21 @@ func (m *ConnectionManager) listenForNewEvents() {
 }
 
 func (m *ConnectionManager) listenForTrackStarts() {
+	events := db.C("events")
 	for trackStart := range m.StartTrack {
 		_, err := GetEvent(trackStart.EventId, trackStart.UserId)
 		if err != nil {
 			log.Println("Unable to retrieve event when starting track play: ", err.Error())
 			continue
 		}
+
+        err = events.Update(bson.M{"event_id": trackStart.EventId}, bson.M{"$set": bson.M{"now_playing": trackStart.TrackId}})
+		if err != nil {
+            log.Println("Unable to update event when starting rack play: ", err.Error())
+            continue
+		}
+
+		manager.Broadcast(&OutgoingCmd{Cmd: "start_track", Params: map[string]interface{}{"track_id": trackStart.TrackId, "event_id": trackStart.EventId}})
 	}
 }
 
@@ -268,7 +277,6 @@ func SocketHandler(sock *websocket.Conn) {
 				Remove:  cmd.Params["remove"].(bool),
 			}
 		case "start_track":
-            log.Println(cmd.Params)
 			manager.StartTrack <- &StartTrackParams{
 				TrackId: cmd.Params["track_id"].(string),
 				UserId:  cmd.Params["user_id"].(string),
