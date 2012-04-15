@@ -56,10 +56,10 @@ type UpvoteParams struct {
 	UserId  string
 	EventId string
 	TrackId string
-	Power   int
 }
 
 type AddTrackParams struct {
+    EventId string `json:"event_id"`
 	TrackId string `json:"track_id"`
 	UserId  string `json:"user_id"`
 }
@@ -103,22 +103,12 @@ func NewConnectionManager() *ConnectionManager {
 }
 
 func (m *ConnectionManager) listenForNewEvents() {
-	c := db.C("events")
 	for eventInfo := range m.CreateEvent {
-		event := new(Event)
-		err := c.Find(bson.M{"event_id": eventInfo.EventId}).One(&event)
-		if err != nil {
-			if err == mgo.NotFound {
-				event.Id = eventInfo.EventId
-				event.UserId = eventInfo.UserId
-				err = c.Insert(event)
-				if err != nil {
-					log.Println("ERROR inserting: ", err.Error())
-				}
-			} else {
-                log.Println("ERROR querying: ", err.Error())
-            }
-		}
+        _, err := GetEvent(eventInfo.EventId, eventInfo.UserId)
+        if err != nil {
+            log.Println("FUCK BALLS")
+            continue
+        }
 	}
 }
 
@@ -129,13 +119,36 @@ func (m *ConnectionManager) listenForLogins() {
 }
 
 // get or create an event by id.  If you create it, you are the host.
-func GetEvent(id string) {
-
+func GetEvent(eventId string, userId string) (*Event, error) {
+	c := db.C("events")
+    event := new(Event)
+    err := c.Find(bson.M{"event_id": eventId}).One(&event)
+    if err != nil {
+        if err == mgo.NotFound {
+            event.Id = eventId
+            event.UserId = userId
+            err = c.Insert(event)
+            if err != nil {
+                log.Println("ERROR inserting: ", err.Error())
+                return nil, err
+            }
+        } else {
+            log.Println("ERROR querying: ", err.Error())
+            return nil, err
+        }
+    }
+    return event, nil
 }
 
 func (m *ConnectionManager) listenForAdds() {
+    c := db.C("events")
 	for add := range m.AddTrack {
-
+        selector := bson.M{"event_id": add.EventId}
+        err := c.Update(selector, bson.M{"$push": bson.M{"upcoming": &UpcomingTrack{TrackId: add.TrackId, Upvoters: []string{add.UserId}}}})
+        if err != nil {
+            log.Println("ERROR adding track: ", err.Error())
+            log.Println(selector)
+        }
 		m.Broadcast(add)
 	}
 }
@@ -186,6 +199,7 @@ func SocketHandler(sock *websocket.Conn) {
 			manager.AddTrack <- &AddTrackParams{
 				TrackId: cmd.Params["track_id"].(string),
 				UserId:  cmd.Params["user_id"].(string),
+                EventId: cmd.Params["event_id"].(string),
 			}
 		case "upvote_track":
 			manager.Upvotes <- &UpvoteParams{
