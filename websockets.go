@@ -22,6 +22,11 @@ type SocketCmd struct {
 	Params map[string]interface{} `json:"params"`
 }
 
+type OutgoingCmd struct {
+	Cmd    string      `json:"cmd"`
+	Params interface{} `json:"params"`
+}
+
 type CreateEventParams struct {
 	UserConn *websocket.Conn
 	EventId  string `json:"event_id"`
@@ -29,10 +34,10 @@ type CreateEventParams struct {
 }
 
 type Event struct {
-	Id       string           `json:"event_id" bson:"event_id"`
-	UserId   string           `json:"user_id" bson:"user_id"`
-	Upcoming []*UpcomingTrack `json:"upcoming" bson:"upcoming,omitempty"`
-	History  []*PastTrack     `json:"history" bson:"history,omitempty"`
+	Id       string              `json:"event_id" bson:"event_id"`
+	UserId   string              `json:"user_id" bson:"user_id"`
+	Upcoming map[string][]string `json:"upcoming" bson:"upcoming,omitempty"`
+	History  []*PastTrack        `json:"history" bson:"history,omitempty"`
 }
 
 type Track struct {
@@ -59,7 +64,7 @@ type UpvoteParams struct {
 }
 
 type AddTrackParams struct {
-    EventId string `json:"event_id"`
+	EventId string `json:"event_id"`
 	TrackId string `json:"track_id"`
 	UserId  string `json:"user_id"`
 }
@@ -104,11 +109,12 @@ func NewConnectionManager() *ConnectionManager {
 
 func (m *ConnectionManager) listenForNewEvents() {
 	for eventInfo := range m.CreateEvent {
-        _, err := GetEvent(eventInfo.EventId, eventInfo.UserId)
-        if err != nil {
-            log.Println("FUCK BALLS")
-            continue
-        }
+		event, err := GetEvent(eventInfo.EventId, eventInfo.UserId)
+		if err != nil {
+			log.Println("FUCK BALLS")
+			continue
+		}
+        websocket.JSON.Send(eventInfo.UserConn, &OutgoingCmd{Cmd: "event_info", Params: event})
 	}
 }
 
@@ -121,41 +127,49 @@ func (m *ConnectionManager) listenForLogins() {
 // get or create an event by id.  If you create it, you are the host.
 func GetEvent(eventId string, userId string) (*Event, error) {
 	c := db.C("events")
-    event := new(Event)
-    err := c.Find(bson.M{"event_id": eventId}).One(&event)
-    if err != nil {
-        if err == mgo.NotFound {
-            event.Id = eventId
-            event.UserId = userId
-            err = c.Insert(event)
-            if err != nil {
-                log.Println("ERROR inserting: ", err.Error())
-                return nil, err
-            }
-        } else {
-            log.Println("ERROR querying: ", err.Error())
-            return nil, err
-        }
-    }
-    return event, nil
+	event := new(Event)
+	err := c.Find(bson.M{"event_id": eventId}).One(&event)
+	if err != nil {
+		if err == mgo.NotFound {
+			event.Id = eventId
+			event.UserId = userId
+			err = c.Insert(event)
+			if err != nil {
+				log.Println("ERROR inserting: ", err.Error())
+				return nil, err
+			}
+		} else {
+			log.Println("ERROR querying: ", err.Error())
+			return nil, err
+		}
+	}
+	return event, nil
 }
 
 func (m *ConnectionManager) listenForAdds() {
-    c := db.C("events")
+	c := db.C("events")
 	for add := range m.AddTrack {
-        selector := bson.M{"event_id": add.EventId}
-        err := c.Update(selector, bson.M{"$push": bson.M{"upcoming": &UpcomingTrack{TrackId: add.TrackId, Upvoters: []string{add.UserId}}}})
-        if err != nil {
-            log.Println("ERROR adding track: ", err.Error())
-            log.Println(selector)
-        }
-		m.Broadcast(add)
+		selector := bson.M{"event_id": add.EventId}
+		err := c.Update(selector, bson.M{"$push": bson.M{"upcoming." + add.TrackId: add.UserId}})
+		if err != nil {
+			log.Println("ERROR adding track: ", err.Error())
+			log.Println(selector)
+			continue
+		}
+		m.Broadcast(&OutgoingCmd{Cmd: "add_track", Params: *add})
 	}
 }
 
 func (m *ConnectionManager) listenForUpvotes() {
+	c := db.C("events")
 	for like := range m.Upvotes {
-		m.Broadcast(like)
+		selector := bson.M{"event_id": like.EventId}
+		err := c.Update(selector, bson.M{"$addToSet": bson.M{"upcoming." + like.TrackId: like.UserId}})
+		if err != nil {
+			log.Println("ERROR adding upvote: ", err.Error())
+			log.Println(selector)
+		}
+		m.Broadcast(&OutgoingCmd{Cmd: "upvote", Params: *like})
 	}
 }
 
@@ -193,13 +207,13 @@ func SocketHandler(sock *websocket.Conn) {
 			}
 			break
 		}
-        log.Println(cmd)
+		log.Println(cmd)
 		switch cmd.Cmd {
 		case "add_track":
 			manager.AddTrack <- &AddTrackParams{
 				TrackId: cmd.Params["track_id"].(string),
 				UserId:  cmd.Params["user_id"].(string),
-                EventId: cmd.Params["event_id"].(string),
+				EventId: cmd.Params["event_id"].(string),
 			}
 		case "upvote_track":
 			manager.Upvotes <- &UpvoteParams{
@@ -216,7 +230,6 @@ func SocketHandler(sock *websocket.Conn) {
 		default:
 			log.Println("Didn't understand this command: ", cmd)
 		}
-		manager.Broadcast(cmd)
 	}
 	manager.Logout <- sock
 }
@@ -227,7 +240,7 @@ func main() {
 		panic(err)
 	}
 	db = s.DB("coca")
-    manager = NewConnectionManager()
+	manager = NewConnectionManager()
 
 	log.Println("serving on :8080")
 	http.Handle("/socket", websocket.Handler(SocketHandler))
