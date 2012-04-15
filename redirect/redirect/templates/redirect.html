@@ -1,3 +1,105 @@
-This is your spotify uri: {{ spotify_uri }}
+<!doctype html>
+<html>
+<head>
+	<style>
+	html,body{
+		background: #f0042a;
+		background: -moz-linear-gradient(top,  #f0042a 0%, #c40424 100%);
+		background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,#f0042a), color-stop(100%,#c40424));
+		background: -webkit-linear-gradient(top,  #f0042a 0%,#c40424 100%);
+		background: -o-linear-gradient(top,  #f0042a 0%,#c40424 100%);
+		background: -ms-linear-gradient(top,  #f0042a 0%,#c40424 100%);
+		background: linear-gradient(top,  #f0042a 0%,#c40424 100%);
+		filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#f0042a', endColorstr='#c40424',GradientType=0 );
+		
 
-<a href="{{ spotify_uri }}">click here to load app</a>
+		color:#fff;
+		height:100%;
+		font-family:"Helvetica Neue", Helvetica, Arial, sans-serif;
+	}
+	#wrapper{
+		background: url("http://kennedysgarage.com/img/noise.png") repeat scroll 0 0 ;
+		height:100%;
+		width:100%;
+	}
+	#container{
+	    width:450px;
+	    left: 50%;
+	    margin-left: -225px;
+	    margin-top: -140px;
+	    position: absolute;
+	    top: 50%;
+	}
+	#content{
+	    background-color:#f7f7f7;
+	    border-radius:4px;
+	    box-shadow:0  5px 14px rgba(0,0,0,0.5), 0 1px 0 #fff inset;
+	    padding:30px;
+	}
+	h1{
+	   color:#30353d;
+	   font-size:50px;
+	   line-height:1.0;
+		font-weight: bold;
+	   font-weight:normal;
+	   margin:0 0 20px;
+	   padding:0;
+	   text-align:center;
+	   text-shadow:0 1px 0 #fff;
+	}
+	h2{
+	   color:#596a74;
+	   font-size:20px;
+	   line-height:1.0;
+	   font-weight:normal;
+	   margin:0 0 30px;
+	   padding:0;
+	   text-align:center;
+	   text-shadow:0 1px 0 #fff;
+	}
+	p{
+		color:#596a74;
+	    margin:0 0 20px;
+	    padding:0;
+		text-align:center;
+	    text-shadow:0 1px 0 #fff;
+	}
+	.btn{
+		background-color:#80b719;
+		border:1px solid #315c73;
+		border-radius:4px;
+		box-shadow:0 1px 0 rgba(255,255,255,0.5) inset;
+		color:#fff;
+		display:block;
+		margin:0;
+		padding:10px 0;
+		text-align:center;
+		text-shadow:0 1px 0 rgba(0,0,0,0.2);
+		/*text-transform: uppercase;*/
+	}
+	.btn:hover{
+		color:#fff;
+	}
+	a{
+		text-decoration: none;
+	}
+	
+	
+	</style>
+</head>
+<body>
+	<div id="wrapper">
+	<div id="container">
+		<div id="content">
+		
+		<h1>Placelist</h1>
+
+		<a href="{{ spotify_uri }}" class="btn">Use This Spotify App</a>
+	
+		</div><!--/content-->	
+	</div><!--/container-->
+	
+</div><!--/wrapper-->	
+
+</body>
+</html>
